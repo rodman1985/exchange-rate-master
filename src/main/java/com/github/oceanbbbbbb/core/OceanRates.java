@@ -32,12 +32,7 @@ public class OceanRates {
         } catch (Exception e) {
           throw new RuntimeException(e);
         }
-      }).orTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-        .exceptionally(ex -> {
-          System.out.println("CoinMarketCap request timed out or failed");
-          return null;
-        })
-        .join();
+      }).get(3, java.util.concurrent.TimeUnit.SECONDS);
       System.out.println("CoinMarketCap price: " + priceByCMC);
     } catch (Exception e) {
       System.out.println("CoinMarketCap failed: " + e.getMessage());
@@ -69,23 +64,7 @@ public class OceanRates {
         } catch (Exception e) {
           throw new RuntimeException(e);
         }
-      }).orTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-        .exceptionally(ex -> {
-          System.out.println("rrexchanger request timed out or failed");
-          // 使用模拟数据
-          System.out.println("Using mock data for " + coin + " in " + currency.name());
-          if (currency == Currency.USD) {
-            return getMockPriceByUsd(coin);
-          } else if (currency == Currency.CNY) {
-            BigDecimal usdPrice = getMockPriceByUsd(coin);
-            return usdPrice.multiply(new BigDecimal(7.0)).setScale(8, RoundingMode.HALF_UP);
-          } else {
-            BigDecimal usdPrice = getMockPriceByUsd(coin);
-            BigDecimal exchangeRate = getMockExchangeRate(currency);
-            return usdPrice.divide(exchangeRate, 8, RoundingMode.HALF_UP);
-          }
-        })
-        .join();
+      }).get(3, java.util.concurrent.TimeUnit.SECONDS);
       System.out.println("rrexchanger price: " + priceByFXH);
     } catch (Exception e) {
       System.out.println("rrexchanger failed: " + e.getMessage());

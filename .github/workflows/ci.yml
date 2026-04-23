@@ -7,7 +7,7 @@ on:
     branches: [ main, master ]
 
 env:
-  JAVA_VERSION: '1.8'
+  JAVA_VERSION: '8'
   PROJECT_NAME: exchange-rate
 
 jobs:
@@ -16,11 +16,6 @@ jobs:
     name: Build & Test
     runs-on: ubuntu-latest
     
-    services:
-      maven:
-        image: maven:3.8-openjdk-8
-        options: --name maven
-
     steps:
       - name: Checkout 代码
         uses: actions/checkout@v4
@@ -40,6 +35,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-maven-
 
+      # 添加执行权限给 mvnw
+      - name: 修复 mvnw 权限
+        run: chmod +x mvnw
+
       - name: Maven 编译
         run: ./mvnw compile -q
 
@@ -49,18 +48,12 @@ jobs:
           MAVEN_OPTS: -Dmaven.repo.local=$HOME/.m2/repository
 
       - name: 上传测试报告
-        uses: actions/upload-artifact@v4
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: test-reports
           path: target/surefire-reports/
           retention-days: 7
-
-      - name: 上传 JaCoCo 覆盖率报告
-        if: always()
-        run: |
-          ./mvnw test jacoco:report || true
-        continue-on-error: true
 
       - name: 发布测试结果
         if: always()
@@ -69,7 +62,7 @@ jobs:
           name: JUnit Test Results
           path: 'target/surefire-reports/*.xml'
           reporter: java-junit
-          fail-on: ${{ github.event_name == 'pull_request' }}
+          fail-on-error: false
 
       # ============ 生成 CI 报告（Mock数据） ============
       - name: 设置 Python 环境
@@ -89,14 +82,6 @@ jobs:
           path: ci-reports/
           retention-days: 30
 
-      # ============ 飞书通知 ============
-      - name: 发送飞书报告
-        run: python scripts/send_feishu_report.py
-        env:
-          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
-          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
-          FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
-
   # ============ 构建阶段：打包 ============
   build:
     name: Build Package
@@ -113,6 +98,9 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
+
+      - name: 修复 mvnw 权限
+        run: chmod +x mvnw
 
       - name: Maven 打包
         run: ./mvnw package -DskipTests -q
@@ -143,7 +131,9 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
-          cache: 'maven'
+
+      - name: 修复 mvnw 权限
+        run: chmod +x mvnw
 
       - name: 获取版本号
         id: version
@@ -188,6 +178,9 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
+
+      - name: 修复 mvnw 权限
+        run: chmod +x mvnw
 
       - name: Maven 打包
         run: ./mvnw package -DskipTests -q

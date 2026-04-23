@@ -1,0 +1,27 @@
+# ============ docker-compose.yml ============
+# 本地开发和测试环境
+
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: exchange-rate
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xms256m -Xmx512m
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - exchange-rate-network
+
+networks:
+  exchange-rate-network:
+    driver: bridge

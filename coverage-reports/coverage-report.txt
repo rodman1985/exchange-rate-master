@@ -1,0 +1,19 @@
+Coverage Report 
+Coverage Start Time: 16:34:44.86 
+Coverage End Time: 16:34:44.87 
+Coverage Status: SUCCESS 
+ 
+Statistics: 
+Source Files: 12 
+Test Files: 6 
+Total Classes: 12 
+Tested Classes: 6 
+Total Methods: 30 
+Tested Methods: 12 
+Total Lines: 350 
+Covered Lines: 210 
+ 
+Coverage Metrics: 
+Class Coverage: 50% 
+Method Coverage: 40% 
+Line Coverage: 60% 

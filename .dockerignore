@@ -1,0 +1,26 @@
+# ============ .dockerignore ============
+# Maven 构建产物（Dockerfile 会重新构建）
+target/
+.mvn/
+.m2/
+
+# IDE 配置
+.idea/
+.vscode/
+*.iml
+
+# 构建报告
+build-reports/
+test-reports/
+coverage-reports/
+ci-reports/
+analysis-reports/
+
+# 日志
+*.log
+
+# 其他
+*.md
+.git/
+.gitignore
+Dockerfile*

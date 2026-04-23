@@ -1,0 +1,222 @@
+# Exchange Rate API Mock Test Data
+# 汇率服务接口自动化测试 Mock 数据
+
+## API Endpoints Mock Configuration
+
+### 1. 获取币种价格 GET /api/price
+**Mock Response (成功):**
+```json
+{
+  "success": true,
+  "data": {
+    "symbol": "BTC",
+    "priceUSD": 67432.50,
+    "priceCNY": 482156.78,
+    "priceEUR": 61823.45,
+    "priceBTC": 1.0,
+    "change24h": 2.35,
+    "volume24h": 28500000000,
+    "marketCap": 1320000000000,
+    "timestamp": "2026-04-23T10:00:00Z"
+  }
+}
+```
+
+### 2. 获取汇率 GET /api/exchange-rate
+**Mock Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "BTC": {
+      "USD": 67432.50,
+      "CNY": 482156.78,
+      "EUR": 61823.45,
+      "JPY": 10123456.78,
+      "GBP": 53678.90
+    },
+    "ETH": {
+      "USD": 3456.78,
+      "CNY": 24723.45,
+      "EUR": 3187.56,
+      "JPY": 523456.78,
+      "GBP": 2756.34
+    },
+    "timestamp": "2026-04-23T10:00:00Z"
+  }
+}
+```
+
+### 3. 获取历史价格 GET /api/history
+**Mock Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "symbol": "BTC",
+    "prices": [
+      {"timestamp": "2026-04-22T00:00:00Z", "open": 67000, "high": 67800, "low": 66500, "close": 67432},
+      {"timestamp": "2026-04-21T00:00:00Z", "open": 66500, "high": 67200, "low": 65800, "close": 67000},
+      {"timestamp": "2026-04-20T00:00:00Z", "open": 68000, "high": 68500, "low": 66200, "close": 66500}
+    ]
+  }
+}
+```
+
+### 4. 币种列表 GET /api/coins
+**Mock Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "total": 100,
+    "coins": [
+      {"rank": 1, "symbol": "BTC", "name": "Bitcoin", "price": 67432.50},
+      {"rank": 2, "symbol": "ETH", "name": "Ethereum", "price": 3456.78},
+      {"rank": 3, "symbol": "BNB", "name": "Binance Coin", "price": 598.45}
+    ]
+  }
+}
+```
+
+### 5. 市场概览 GET /api/market
+**Mock Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "totalMarketCap": 2500000000000,
+    "total24hVolume": 98500000000,
+    "btcDominance": 52.5,
+    "ethDominance": 17.8,
+    "activeCoins": 12500,
+    "timestamp": "2026-04-23T10:00:00Z"
+  }
+}
+```
+
+### 6. 价格转换 POST /api/convert
+**Mock Request:**
+```json
+{
+  "from": "BTC",
+  "to": "CNY",
+  "amount": 1.5
+}
+```
+**Mock Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "from": "BTC",
+    "to": "CNY",
+    "amount": 1.5,
+    "result": 723235.17,
+    "rate": 482156.78
+  }
+}
+```
+
+### 7. 批量查询 POST /api/batch
+**Mock Request:**
+```json
+{
+  "symbols": ["BTC", "ETH", "BNB"],
+  "currency": "USD"
+}
+```
+**Mock Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "BTC": {"USD": 67432.50},
+    "ETH": {"USD": 3456.78},
+    "BNB": {"USD": 598.45}
+  }
+}
+```
+
+### 8. 错误处理测试用例
+**Mock Response (错误):**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "COIN_NOT_FOUND",
+    "message": "The requested coin symbol does not exist"
+  }
+}
+```
+
+## Test Case Scenarios
+
+### Normal Scenarios (35 cases)
+1. Get BTC price - all currencies
+2. Get ETH price - all currencies
+3. Get BNB price - all currencies
+4. Get exchange rate - BTC/USD
+5. Get exchange rate - ETH/CNY
+6. Get historical prices - 1 day
+7. Get historical prices - 7 days
+8. Get historical prices - 30 days
+9. Get coin list - top 10
+10. Get coin list - with pagination
+11. Get market overview - basic
+12. Get market overview - detailed
+13. Convert 1 BTC to CNY
+14. Convert 0.5 ETH to USD
+15. Convert 100 BNB to EUR
+16. Batch query - 3 coins
+17. Batch query - 10 coins
+18. Verify price format - decimal places
+19. Verify rate calculation accuracy
+20. Verify timestamp format
+21. Multiple concurrent requests
+22. Rapid rate limiting test
+23. Currency boundary test - minimum
+24. Currency boundary test - maximum
+25. Symbol case sensitivity - uppercase
+26. Symbol case sensitivity - lowercase
+27. Cache hit verification
+28. Cache expiration test
+29. Response time under 200ms
+30. Response time under 500ms
+31. Headers verification
+32. JSON structure validation
+33. Null handling - empty symbol
+34. Zero amount conversion
+35. Large amount conversion
+
+### Boundary Value Scenarios (10 cases)
+1. Smallest valid amount: 0.00000001 BTC
+2. Largest common amount: 1000000 USD
+3. Rare currency pair: XMR/JPY
+4. Newly listed coin: short symbol (1-2 chars)
+5. Very old coin: historical data edge
+6. Price near zero: de-listed coin
+7. Price at maximum: institutional scale
+8. Conversion precision: 8 decimal places
+9. Network timeout boundary: 30 seconds
+10. Rate limit edge: 60 requests/minute
+
+### Exception Scenarios (5 cases)
+1. Invalid coin symbol
+2. Unsupported currency code
+3. Network timeout
+4. Rate limit exceeded (429)
+5. Server internal error (500)
+
+### Test Results Summary (Mock Data)
+| 接口 | 用例数 | 通过 | 失败 |
+|------|--------|------|------|
+| /api/price | 10 | 10 | 0 |
+| /api/exchange-rate | 8 | 8 | 0 |
+| /api/history | 7 | 7 | 0 |
+| /api/coins | 5 | 5 | 0 |
+| /api/market | 6 | 6 | 0 |
+| /api/convert | 8 | 8 | 0 |
+| /api/batch | 4 | 4 | 0 |
+| /api/error | 2 | 2 | 0 |
+| **总计** | **50** | **50** | **0** |

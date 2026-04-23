@@ -1,307 +1,178 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-发送飞书卡片消息 - CI/CD 报告通知（富文本格式）
-支持动态获取构建时间和报告链接
+发送CI构建报告到飞书
 """
-
+import base64
 import json
-import requests
 import os
+import sys
 from datetime import datetime
 from xml.etree import ElementTree as ET
 
-# 飞书配置（优先使用环境变量）
-APP_ID = "cli_a9623fab0ea15bd2"
-APP_SECRET = "HnmtJk3CND4p2GsF3OvjGf5eY0OC58lT"
-USER_OPEN_ID = "ou_a50b9673d242e46db6c49d5574cdc65a"
+import requests
 
-# 如果有环境变量则覆盖
-APP_ID = os.getenv("FEISHU_APP_ID", APP_ID)
-APP_SECRET = os.getenv("FEISHU_APP_SECRET", APP_SECRET)
-USER_OPEN_ID = os.getenv("FEISHU_USER_OPEN_ID", USER_OPEN_ID)
-API_BASE = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+# ============ 配置 ============
+FEISHU_APP_ID = 'cli_a9623fab0ea15bd2'
+FEISHU_APP_SECRET = 'HnmtJk3CND4p2GsF3OvjGf5eY0OC58lT'
+FEISHU_USER_OPEN_ID = 'ou_a50b9673d242e46db6c49d5574cdc65a'
 
-# GitHub 配置
-GITHUB_RUN_ID = os.getenv("GITHUB_RUN_ID", "")
-GITHUB_REPO = os.getenv("GITHUB_REPO", "rodman1985/exchange-rate-master")
-GITHUB_SHA = os.getenv("GITHUB_SHA", "")[:7]  # 短commit hash
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "rodman1985/exchange-rate-master")
+GITHUB_RUN_ID = os.environ.get("GITHUB_RUN_ID", "test-run")
+COMPILE_STATUS = os.environ.get("COMPILE_STATUS", "success")
+TEST_STATUS = os.environ.get("TEST_STATUS", "success")
 
-# 构建状态
-COMPILE_STATUS = os.getenv("COMPILE_STATUS", "success")
-TEST_STATUS = os.getenv("TEST_STATUS", "success")
+# 报告链接 - 直接指向Git仓库
+REPO_URL = f"https://github.com/{GITHUB_REPO}"
+CI_REPORT_URL = f"{REPO_URL}/blob/main/reports/ci-report-{GITHUB_RUN_ID}.html"
+JUNIT_REPORT_URL = f"{REPO_URL}/blob/main/reports/test-report/index.html"
+JACOCO_REPORT_URL = f"{REPO_URL}/blob/main/reports/coverage/index.html"
 
 
-def get_tenant_token():
-    """获取 tenant_access_token"""
-    url = API_BASE
-    headers = {"Content-Type": "application/json"}
-    data = {"app_id": APP_ID, "app_secret": APP_SECRET}
-    
-    try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
-        result = response.json()
-        if result.get("code") == 0:
-            return result.get("tenant_access_token")
-        else:
-            print(f"[ERROR] Get token failed: {result}")
-            return None
-    except Exception as e:
-        print(f"[ERROR] Request failed: {e}")
-        return None
+def get_feishu_token():
+    """获取飞书访问令牌"""
+    url = 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal'
+    r = requests.post(url, json={'app_id': FEISHU_APP_ID, 'app_secret': FEISHU_APP_SECRET}, timeout=10)
+    if r.status_code == 200:
+        result = r.json()
+        if result.get('code') == 0:
+            return result.get('tenant_access_token')
+    print(f"获取Token失败: {r.text}")
+    return None
 
 
-def send_card_message(token, user_id, card_content):
-    """发送卡片消息"""
-    url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}"
-    }
+def send_feishu_message(token, card):
+    """发送飞书消息"""
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     data = {
-        "receive_id": user_id,
+        "receive_id": FEISHU_USER_OPEN_ID,
         "msg_type": "interactive",
-        "content": json.dumps(card_content)
+        "content": json.dumps(card)  # JSON字符串
     }
-    
-    try:
-        response = requests.post(url, headers=headers, json=data, timeout=15)
-        result = response.json()
-        if result.get("code") == 0:
-            print(f"[OK] Card message sent successfully")
+    params = {"receive_id_type": "open_id"}
+
+    url = "https://open.feishu.cn/open-apis/im/v1/messages"
+    r = requests.post(url, headers=headers, json=data, params=params, timeout=10)
+
+    if r.status_code == 200:
+        result = r.json()
+        if result.get('code') == 0:
+            print("飞书消息发送成功")
             return True
         else:
-            print(f"[ERROR] Send failed: {result}")
-            return False
-    except Exception as e:
-        print(f"[ERROR] Request failed: {e}")
-        return False
-
-
-def get_test_stats():
-    """从 XML 报告获取测试统计"""
-    import glob
-    total_tests = 0
-    total_failures = 0
-    total_errors = 0
-    test_cases = []
-    
-    xml_files = glob.glob("target/surefire-reports/*.xml")
-    for xml_file in xml_files:
-        try:
-            tree = ET.parse(xml_file)
-            root = tree.getroot()
-            
-            # 获取测试类名
-            testsuite = root.get("name", "unknown")
-            tests = int(root.get("tests", "0"))
-            failures = int(root.get("failures", "0"))
-            errors = int(root.get("errors", "0"))
-            skipped = int(root.get("skipped", "0"))
-            time = float(root.get("time", "0"))
-            
-            total_tests += tests
-            total_failures += failures
-            total_errors += errors
-            
-            # 计算该测试类的通过数
-            passed = tests - failures - errors - skipped
-            
-            # 简化类名
-            short_name = testsuite.replace("com.github.oceanbbbbbb.", "").replace("test.", "")
-            
-            # 获取每个测试用例的详细信息
-            test_methods = []
-            for testcase in root.findall("testcase"):
-                method_name = testcase.get("name", "")
-                classname = testcase.get("classname", testsuite)
-                tc_time = float(testcase.get("time", "0"))
-                
-                # 检查是否有失败或错误
-                failure = testcase.find("failure")
-                error = testcase.find("error")
-                skipped_elem = testcase.find("skipped")
-                
-                if failure is not None:
-                    status = "❌"
-                    msg = failure.get("message", "失败")[:50]
-                elif error is not None:
-                    status = "❌"
-                    msg = error.get("message", "错误")[:50]
-                elif skipped_elem is not None:
-                    status = "⏭️"
-                    msg = "跳过"
-                else:
-                    status = "✅"
-                    msg = f"{tc_time:.2f}s"
-                
-                test_methods.append({
-                    "name": method_name,
-                    "classname": classname,
-                    "status": status,
-                    "msg": msg
-                })
-            
-            test_cases.append({
-                "name": short_name,
-                "full_name": testsuite,
-                "total": tests,
-                "passed": passed,
-                "failures": failures,
-                "errors": errors,
-                "skipped": skipped,
-                "time": time,
-                "methods": test_methods,
-                "overall_status": "✅" if failures == 0 and errors == 0 else "❌"
-            })
-        except Exception as e:
-            print(f"[WARN] Parse {xml_file} failed: {e}")
-    
-    return total_tests, total_failures, total_errors, test_cases
-
-
-def build_test_details_md(test_cases):
-    """构建测试详情（显示每个测试用例）"""
-    lines = []
-    for tc in test_cases:
-        status_icon = tc["overall_status"]
-        lines.append(f"**{tc['name']}** {status_icon} ({tc['passed']}/{tc['total']})")
-        for method in tc["methods"]:
-            lines.append(f"  • {method['name']}: {method['status']} {method['msg']}")
-    return "\n".join(lines)
-
-
-def build_test_summary_md(test_cases):
-    """构建测试摘要"""
-    lines = []
-    for tc in test_cases:
-        status_icon = tc["overall_status"]
-        lines.append(f"• {tc['name']}: {status_icon} ({tc['passed']}/{tc['total']}通过)")
-    return "\n".join(lines)
-
-
-def build_card_message():
-    """构建卡片消息内容"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # 获取测试统计
-    try:
-        total_tests, failures, errors, test_cases = get_test_stats()
-        passed = total_tests - failures - errors
-        test_details_md = build_test_details_md(test_cases)
-        test_summary_md = build_test_summary_md(test_cases)
-    except Exception as e:
-        print(f"[WARN] Get test stats failed: {e}")
-        total_tests, failures, passed = 31, 0, 31
-        test_cases = []
-        test_details_md = "• OceanRatesTest: ✅ (14/14)\n• ExchangeRateBusinessTest: ✅ (17/17)"
-        test_summary_md = test_details_md
-
-    # 构建状态
-    compile_icon = "✅" if COMPILE_STATUS == "success" else "❌"
-    test_icon = "✅" if TEST_STATUS == "success" else "❌"
-    
-    # 报告链接 - 使用 GitHub Pages
-    repo_url = f"https://github.com/{GITHUB_REPO}"
-    
-    # GitHub Pages URL - 格式: https://{username}.github.io/{repo}/
-    username = GITHUB_REPO.split('/')[0]
-    pages_base = f"https://{username}.github.io/exchange-rate-master"
-    
-    if GITHUB_SHA:
-        # 不同的artifact上传到GitHub Pages时会自动创建子目录
-        ci_report_url = f"{pages_base}/"
-        junit_report_url = f"{pages_base}/test-reports/"
-        jacoco_report_url = f"{pages_base}/coverage-reports/"
+            print(f"飞书API错误: {result}")
     else:
-        # 本地测试模式
-        ci_report_url = repo_url
-        junit_report_url = repo_url
-        jacoco_report_url = repo_url
+        print(f"HTTP错误: {r.status_code} - {r.text[:200]}")
+    return False
 
+
+def get_test_summary():
+    """从XML获取测试结果"""
+    import glob
+    xml_files = glob.glob("target/surefire-reports/*.xml")
+
+    total_tests = 0
+    total_passed = 0
+    total_failed = 0
+    test_classes = []
+
+    for f in xml_files:
+        try:
+            tree = ET.parse(f)
+            root = tree.getroot()
+            tests = int(root.get("tests", 0))
+            failures = int(root.get("failures", 0))
+            errors = int(root.get("errors", 0))
+            passed = tests - failures - errors
+
+            name = root.get("name", "unknown")
+            short_name = name.replace("com.github.oceanbbbbbb.", "").replace("test.", "")
+
+            test_classes.append({
+                "name": short_name,
+                "tests": tests,
+                "passed": passed,
+                "failed": failures + errors
+            })
+
+            total_tests += tests
+            total_passed += passed
+            total_failed += failures + errors
+        except Exception:
+            pass
+
+    return {
+        "total": total_tests,
+        "passed": total_passed,
+        "failed": total_failed,
+        "classes": test_classes
+    }
+
+
+def build_feishu_card():
+    """构建飞书消息卡片"""
+    test_data = get_test_summary()
+
+    # 确定整体状态
+    overall_status = "成功" if test_data["failed"] == 0 else "部分失败"
+    status_emoji = "✅" if test_data["failed"] == 0 else "⚠️"
+    template = "green" if test_data["failed"] == 0 else "orange"
+
+    # 测试类详情
+    class_details = ""
+    for cls in test_data["classes"]:
+        status_icon = "✅" if cls["failed"] == 0 else "❌"
+        class_details += f'{status_icon} {cls["name"]}: {cls["passed"]}/{cls["tests"]}\n'
+
+    if not class_details:
+        class_details = "暂无测试数据"
+
+    # 构建卡片
     card = {
-        "config": {
-            "wide_screen_mode": True
-        },
         "header": {
             "title": {
                 "tag": "plain_text",
-                "content": "🚀 CI/CD 构建报告 - Exchange Rate"
+                "content": f"{status_emoji} CI构建报告 - Exchange Rate"
             },
-            "template": "blue"
+            "template": template
         },
         "elements": [
-            # 执行时间
             {
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"**执行时间**: {timestamp}"
+                    "content": (
+                        f"**📅 执行时间：**{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                        f"**🔖 版本：**0.0.1-SNAPSHOT\n\n"
+                        f"**📊 状态：{overall_status}**"
+                    )
                 }
             },
             {"tag": "hr"},
-            
-            # 状态概览卡片
-            {
-                "tag": "column_set",
-                "flex_mode": "bisect",
-                "background_style": "grey",
-                "columns": [
-                    {
-                        "tag": "column",
-                        "width": "stretched",
-                        "vertical_align": "top",
-                        "elements": [
-                            {"tag": "div", "text": {"tag": "lark_md", "content": "**🟢 构建状态**\n成功"}}
-                        ]
-                    },
-                    {
-                        "tag": "column",
-                        "width": "stretched",
-                        "vertical_align": "top",
-                        "elements": [
-                            {"tag": "div", "text": {"tag": "lark_md", "content": f"**📊 单元测试**\n{passed}/{total_tests} 通过"}}
-                        ]
-                    }
-                ]
-            },
-            {"tag": "hr"},
-            
-            # 测试详情 - 显示每个测试类的通过/失败状态
             {
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": "**📋 单测结果详情**"
+                    "content": (
+                        f"**📈 测试汇总**\n\n"
+                        f"- 总用例：{test_data['total']}\n"
+                        f"- 通过：{test_data['passed']}\n"
+                        f"- 失败：{test_data['failed']}"
+                    )
                 }
             },
             {
-                "tag": "note",
-                "elements": [
-                    {
-                        "tag": "plain_text",
-                        "content": test_summary_md
-                    }
-                ]
-            },
-            {"tag": "hr"},
-            
-            # 构建阶段（只显示成功/失败）
-            {
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"**📦 构建阶段**\n\n• {compile_icon} 编译源码 - {'成功' if COMPILE_STATUS == 'success' else '失败'}\n• {test_icon} Maven 测试 - {'成功' if TEST_STATUS == 'success' else '失败'}\n• ✅ 打包 JAR\n• ✅ 发布测试结果"
+                    "content": f"**📝 测试详情**\n```\n{class_details}```"
                 }
             },
             {"tag": "hr"},
-            
-            # 报告链接 - 三个按钮
             {
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": "**📎 报告下载**"
+                    "content": "**📎 报告链接**"
                 }
             },
             {
@@ -309,59 +180,54 @@ def build_card_message():
                 "actions": [
                     {
                         "tag": "button",
-                        "text": {
-                            "tag": "plain_text",
-                            "content": "📄 完整CI报告"
-                        },
+                        "text": {"tag": "plain_text", "content": "📄 CI构建报告"},
                         "type": "primary",
-                        "multi_url": {
-                            "url": ci_report_url,
-                            "pc_url": ci_report_url
-                        }
+                        "url": CI_REPORT_URL
                     },
                     {
                         "tag": "button",
-                        "text": {
-                            "tag": "plain_text",
-                            "content": "🧪 单测报告"
-                        },
-                        "type": "default",
-                        "multi_url": {
-                            "url": junit_report_url,
-                            "pc_url": junit_report_url
-                        }
+                        "text": {"tag": "plain_text", "content": "🧪 单测报告"},
+                        "type": "primary",
+                        "url": JUNIT_REPORT_URL
                     },
                     {
                         "tag": "button",
-                        "text": {
-                            "tag": "plain_text",
-                            "content": "📊 覆盖率报告"
-                        },
-                        "type": "default",
-                        "multi_url": {
-                            "url": jacoco_report_url,
-                            "pc_url": jacoco_report_url
-                        }
+                        "text": {"tag": "plain_text", "content": "📊 覆盖率报告"},
+                        "type": "primary",
+                        "url": JACOCO_REPORT_URL
                     }
+                ]
+            },
+            {
+                "tag": "note",
+                "elements": [
+                    {"tag": "plain_text", "content": f"Run ID: {GITHUB_RUN_ID}"}
                 ]
             }
         ]
     }
-    
+
     return card
 
 
 def main():
-    print("[INFO] Getting tenant token...")
-    token = get_tenant_token()
-    
-    if token:
-        print("[INFO] Building card message...")
-        card = build_card_message()
-        print("[INFO] Sending card message...")
-        send_card_message(token, USER_OPEN_ID, card)
-    else:
-        print("[ERROR] Failed to get token. Please check APP_SECRET.")
+    print("=" * 50)
+    print("CI飞书报告发送")
+    print("=" * 50)
+    print(f"仓库: {GITHUB_REPO}")
+    print(f"Run ID: {GITHUB_RUN_ID}")
+
+    # 获取飞书Token
+    token = get_feishu_token()
+    if not token:
+        print("无法获取飞书访问令牌")
+        sys.exit(1)
+
+    # 构建并发送卡片
+    card = build_feishu_card()
+    success = send_feishu_message(token, card)
+
+    sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":

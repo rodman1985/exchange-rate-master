@@ -205,14 +205,14 @@ def build_card_message():
     repo_url = f"https://github.com/{GITHUB_REPO}"
     
     # GitHub Pages URL - 格式: https://{username}.github.io/{repo}/
-    # 由于仓库名是 exchange-rate-master，需要获取 username
     username = GITHUB_REPO.split('/')[0]
     pages_base = f"https://{username}.github.io/exchange-rate-master"
     
     if GITHUB_SHA:
-        ci_report_url = f"{pages_base}/ci-report/ci-report-latest.html"
-        junit_report_url = f"{pages_base}/test-report/index.html"
-        jacoco_report_url = f"{pages_base}/coverage/index.html"
+        # 不同的artifact上传到GitHub Pages时会自动创建子目录
+        ci_report_url = f"{pages_base}/"
+        junit_report_url = f"{pages_base}/test-reports/"
+        jacoco_report_url = f"{pages_base}/coverage-reports/"
     else:
         # 本地测试模式
         ci_report_url = repo_url

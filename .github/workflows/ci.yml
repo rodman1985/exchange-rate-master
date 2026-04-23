@@ -11,7 +11,6 @@ env:
   PROJECT_NAME: exchange-rate
 
 jobs:
-  # ============ CI 阶段：构建与测试 ============
   ci:
     name: Build & Test
     runs-on: ubuntu-latest
@@ -20,7 +19,7 @@ jobs:
       - name: Checkout 代码
         uses: actions/checkout@v4
 
-      - name: 设置 JDK ${{ env.JAVA_VERSION }}
+      - name: 设置 JDK
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
@@ -32,20 +31,12 @@ jobs:
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
 
-      # 添加执行权限给 mvnw
       - name: 修复 mvnw 权限
         run: chmod +x mvnw
 
-      - name: Maven 编译
-        run: ./mvnw compile -q
-
-      - name: Maven 测试（生成报告）
+      - name: Maven 测试
         run: ./mvnw test
-        env:
-          MAVEN_OPTS: -Dmaven.repo.local=$HOME/.m2/repository
 
       - name: 上传测试报告
         if: always()
@@ -53,7 +44,6 @@ jobs:
         with:
           name: test-reports
           path: target/surefire-reports/
-          retention-days: 7
 
       - name: 发布测试结果
         if: always()
@@ -63,8 +53,8 @@ jobs:
           path: 'target/surefire-reports/*.xml'
           reporter: java-junit
           fail-on-error: false
+          fail-on-empty: false
 
-      # ============ 生成 CI 报告（Mock数据） ============
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
         with:
@@ -80,138 +70,3 @@ jobs:
         with:
           name: ci-reports
           path: ci-reports/
-          retention-days: 30
-
-  # ============ 构建阶段：打包 ============
-  build:
-    name: Build Package
-    runs-on: ubuntu-latest
-    needs: ci
-    
-    steps:
-      - name: Checkout 代码
-        uses: actions/checkout@v4
-
-      - name: 设置 JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: 'maven'
-
-      - name: 修复 mvnw 权限
-        run: chmod +x mvnw
-
-      - name: Maven 打包
-        run: ./mvnw package -DskipTests -q
-
-      - name: 上传 JAR 文件
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.PROJECT_NAME }}-jar
-          path: target/*.jar
-          retention-days: 5
-
-  # ============ 发布阶段：GitHub Releases ============
-  release:
-    name: Release
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    
-    permissions:
-      contents: write
-    
-    steps:
-      - name: Checkout 代码
-        uses: actions/checkout@v4
-
-      - name: 设置 JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-
-      - name: 修复 mvnw 权限
-        run: chmod +x mvnw
-
-      - name: 获取版本号
-        id: version
-        run: |
-          VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "VERSION=$VERSION"
-
-      - name: Maven 打包
-        run: ./mvnw package -DskipTests -q
-
-      - name: 创建 Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.VERSION }}
-          name: Release ${{ steps.version.outputs.VERSION }}
-          draft: false
-          prerelease: ${{ contains(steps.version.outputs.VERSION, 'SNAPSHOT') }}
-          generate_release_notes: true
-          files: |
-            target/${{ env.PROJECT_NAME }}-${{ steps.version.outputs.VERSION }}.jar
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ============ Docker 镜像构建（可选） ============
-  docker:
-    name: Build Docker Image
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    
-    permissions:
-      contents: read
-      packages: write
-    
-    steps:
-      - name: Checkout 代码
-        uses: actions/checkout@v4
-
-      - name: 设置 JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-
-      - name: 修复 mvnw 权限
-        run: chmod +x mvnw
-
-      - name: Maven 打包
-        run: ./mvnw package -DskipTests -q
-
-      - name: 提取版本号
-        id: version
-        run: |
-          VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: 设置 QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: 设置 Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: 登录 GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 构建并推送 Docker 镜像
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max

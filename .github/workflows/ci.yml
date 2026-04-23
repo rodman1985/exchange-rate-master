@@ -105,7 +105,8 @@ jobs:
 
       # ============ 飞书通知 ============
       - name: 发送飞书报告
-        run: python scripts/send_feishu_report.py
+        if: always()
+        run: python scripts/send_feishu_report.py || true
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}

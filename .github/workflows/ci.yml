@@ -19,6 +19,8 @@ jobs:
     permissions:
       contents: read
       checks: write
+      pages: write
+      id-token: write
 
     steps:
       - name: Checkout 代码
@@ -78,37 +80,86 @@ jobs:
           fail-on-error: false
           fail-on-empty: false
 
-      # ============ 生成 CI 报告 ============
+      # ============ 生成报告并准备 GitHub Pages ============
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: 生成 CI 聚合报告
+      - name: 准备报告目录
         run: |
           mkdir -p ci-reports
-          python scripts/generate-ci-report.py
+          mkdir -p test-reports
+          mkdir -p coverage-reports
+          
+          # 生成 CI 聚合报告
+          python scripts/generate-ci-report.py || true
+          
+          # 复制 CI 报告
+          cp ci-reports/ci-report-latest.html ci-reports/index.html || true
+          
+          # 复制单测报告 (将XML转换为HTML)
+          python -c "
+          import glob
+          import os
+          from xml.etree import ElementTree as ET
+          
+          xml_files = glob.glob('target/surefire-reports/*.xml')
+          html = '''<!DOCTYPE html>
+<html><head><meta charset=\"UTF-8\"><title>单测报告</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 20px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+th { background-color: #4CAF50; color: white; }
+.pass { color: green; }
+.fail { color: red; }
+</style></head><body>
+<h1>单元测试报告</h1>
+<table><tr><th>测试类</th><th>总数</th><th>通过</th><th>失败</th><th>状态</th></tr>
+'''
+          for f in xml_files:
+              try:
+                  tree = ET.parse(f)
+                  root = tree.getroot()
+                  name = root.get('name', 'unknown')
+                  tests = root.get('tests', '0')
+                  failures = root.get('failures', '0')
+                  errors = root.get('errors', '0')
+                  passed = int(tests) - int(failures) - int(errors)
+                  status = 'PASS' if int(failures) == 0 and int(errors) == 0 else 'FAIL'
+                  status_class = 'pass' if status == 'PASS' else 'fail'
+                  html += f'<tr><td>{name}</td><td>{tests}</td><td>{passed}</td><td>{failures}</td><td class=\"{status_class}\">{status}</td></tr>'
+              except:
+                  pass
+          html += '</table></body></html>'
+          with open('test-reports/index.html', 'w', encoding='utf-8') as out:
+              out.write(html)
+          "
+          
+          # 复制覆盖率报告
+          cp -r target/site/jacoco/* coverage-reports/ 2>/dev/null || true
 
       # ============ 发布报告到 GitHub Pages ============
       - name: 配置 GitHub Pages
         uses: actions/configure-pages@v4
+        with:
+          enablement: true
 
-      - name: 上传 CI 报告到 Pages
+      - name: 上传报告到 GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: ci-reports/
 
-      - name: 上传单测报告到 Pages
+      - name: 上传单测报告
         uses: actions/upload-pages-artifact@v3
         with:
-          path: target/surefire-reports/
-          destination: test-report
+          path: test-reports/
 
-      - name: 上传覆盖率报告到 Pages
+      - name: 上传覆盖率报告
         uses: actions/upload-pages-artifact@v3
         with:
-          path: target/site/jacoco/
-          destination: coverage
+          path: coverage-reports/
 
       - name: 部署 GitHub Pages
         id: deployment

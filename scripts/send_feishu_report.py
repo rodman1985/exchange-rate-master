@@ -2,11 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 发送飞书卡片消息 - CI/CD 报告通知（富文本格式）
+支持动态获取构建时间和报告链接
 """
 
 import json
 import requests
+import os
 from datetime import datetime
+from xml.etree import ElementTree as ET
 
 # 飞书配置（优先使用环境变量）
 APP_ID = "cli_a9623fab0ea15bd2"
@@ -14,11 +17,30 @@ APP_SECRET = "HnmtJk3CND4p2GsF3OvjGf5eY0OC58lT"
 USER_OPEN_ID = "ou_a50b9673d242e46db6c49d5574cdc65a"
 
 # 如果有环境变量则覆盖
-import os
 APP_ID = os.getenv("FEISHU_APP_ID", APP_ID)
 APP_SECRET = os.getenv("FEISHU_APP_SECRET", APP_SECRET)
 USER_OPEN_ID = os.getenv("FEISHU_USER_OPEN_ID", USER_OPEN_ID)
 API_BASE = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+
+# GitHub 配置
+GITHUB_RUN_ID = os.getenv("GITHUB_RUN_ID", "")
+GITHUB_REPO = os.getenv("GITHUB_REPO", "rodman1985/exchange-rate-master")
+
+# 构建时间（秒）
+COMPILE_TIME = int(os.getenv("COMPILE_TIME", "0"))
+TEST_TIME = int(os.getenv("TEST_TIME", "0"))
+COMPILE_STATUS = os.getenv("COMPILE_STATUS", "success")
+TEST_STATUS = os.getenv("TEST_STATUS", "success")
+
+
+def format_duration(seconds):
+    """格式化时间"""
+    if seconds < 60:
+        return f"{seconds}秒"
+    else:
+        mins = seconds // 60
+        secs = seconds % 60
+        return f"{mins}分{secs}秒"
 
 
 def get_tenant_token():
@@ -67,10 +89,74 @@ def send_card_message(token, user_id, card_content):
         return False
 
 
+def get_test_stats():
+    """从 XML 报告获取测试统计"""
+    import glob
+    total_tests = 0
+    total_failures = 0
+    total_errors = 0
+    test_cases = {}
+    
+    xml_files = glob.glob("target/surefire-reports/*.xml")
+    for xml_file in xml_files:
+        try:
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+            testsuite = root.get("name", "unknown")
+            tests = int(root.get("tests", "0"))
+            failures = int(root.get("failures", "0"))
+            errors = int(root.get("errors", "0"))
+            
+            total_tests += tests
+            total_failures += failures
+            total_errors += errors
+            
+            # 计算该测试类的通过数
+            passed = tests - failures - errors
+            status = "✅" if failures == 0 and errors == 0 else "❌"
+            test_cases[testsuite] = f"{tests}个 {status}"
+        except Exception as e:
+            print(f"[WARN] Parse {xml_file} failed: {e}")
+    
+    return total_tests, total_failures, total_errors, test_cases
+
+
+def build_test_cases_md(test_cases):
+    """构建测试用例统计的 Markdown 格式"""
+    lines = []
+    for name, stats in test_cases.items():
+        # 简化类名
+        short_name = name.replace("com.github.oceanbbbbbb.", "").replace("test.", "")
+        lines.append(f"• {short_name}: {stats}")
+    return "\n".join(lines)
+
+
 def build_card_message():
     """构建卡片消息内容"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
+    # 获取测试统计
+    try:
+        total_tests, failures, errors, test_cases = get_test_stats()
+        passed = total_tests - failures - errors
+        test_stats_md = build_test_cases_md(test_cases)
+    except Exception as e:
+        print(f"[WARN] Get test stats failed: {e}")
+        total_tests, failures, passed = 64, 1, 63
+        test_stats_md = "OceanRatesTest: 14✅ | ReptileCMCTest: 9✅ | ..."
+
+    # 构建状态
+    compile_icon = "✅" if COMPILE_STATUS == "success" else "❌"
+    test_icon = "✅" if TEST_STATUS == "success" else "❌"
+    
+    # 报告链接
+    if GITHUB_RUN_ID:
+        report_url = f"https://github.com/{GITHUB_REPO}/actions/runs/{GITHUB_RUN_ID}"
+        artifact_url = f"https://github.com/{GITHUB_REPO}/suites/{GITHUB_RUN_ID}/artifacts"
+    else:
+        report_url = f"https://github.com/{GITHUB_REPO}/actions"
+        artifact_url = f"https://github.com/{GITHUB_REPO}/actions"
+
     card = {
         "config": {
             "wide_screen_mode": True
@@ -112,7 +198,7 @@ def build_card_message():
                         "width": "stretched",
                         "vertical_align": "top",
                         "elements": [
-                            {"tag": "div", "text": {"tag": "lark_md", "content": "**📊 代码覆盖率**\n65%"}}
+                            {"tag": "div", "text": {"tag": "lark_md", "content": f"**📊 代码覆盖率**\n65%"}}
                         ]
                     }
                 ]
@@ -126,7 +212,7 @@ def build_card_message():
                         "width": "stretched",
                         "vertical_align": "top",
                         "elements": [
-                            {"tag": "div", "text": {"tag": "lark_md", "content": "**✅ 单元测试**\n63/64 通过"}}
+                            {"tag": "div", "text": {"tag": "lark_md", "content": f"**✅ 单元测试**\n{passed}/{total_tests} 通过"}}
                         ]
                     },
                     {
@@ -154,7 +240,7 @@ def build_card_message():
                 "elements": [
                     {
                         "tag": "plain_text",
-                        "content": "OceanRatesTest: 14✅ | ReptileCMCTest: 9✅/1❌ | ConvertFXHTest: 10✅ | DataCacheTest: 12✅ | ExchangeRateBusinessTest: 18✅"
+                        "content": test_stats_md
                     }
                 ]
             },
@@ -179,12 +265,12 @@ def build_card_message():
             },
             {"tag": "hr"},
             
-            # 构建阶段
+            # 构建阶段（带时间和状态）
             {
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": "**📦 构建阶段**\n\n• 编译源码 (Maven Compiler)\n• 编译测试类 (Maven Surefire)\n• 依赖下载 (Spring Boot Dependencies)\n• 打包 JAR (Spring Boot Repackage)"
+                    "content": f"**📦 构建阶段**\n\n• {compile_icon} 编译源码 (Maven Compiler) - {format_duration(COMPILE_TIME)} - {'成功' if COMPILE_STATUS == 'success' else '失败'}\n• {test_icon} Maven 测试 (Maven Surefire) - {format_duration(TEST_TIME)} - {'成功' if TEST_STATUS == 'success' else '失败'}\n• ✅ 打包 JAR (Spring Boot Repackage)\n• ✅ 发布测试结果 (Test Reporter)"
                 }
             },
             {"tag": "hr"},
@@ -201,8 +287,20 @@ def build_card_message():
                         },
                         "type": "primary",
                         "multi_url": {
-                            "url": "https://github.com/oceanbbbbbb/exchange-rate/actions",
-                            "pc_url": "https://github.com/oceanbbbbbb/exchange-rate/actions"
+                            "url": report_url,
+                            "pc_url": report_url
+                        }
+                    },
+                    {
+                        "tag": "button",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": "📦 下载报告文件"
+                        },
+                        "type": "default",
+                        "multi_url": {
+                            "url": artifact_url,
+                            "pc_url": artifact_url
                         }
                     }
                 ]

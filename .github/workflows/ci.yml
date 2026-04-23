@@ -45,22 +45,20 @@ jobs:
       - name: Maven 编译
         id: compile
         run: |
-          START=$(date +%s)
           ./mvnw compile -q
-          END=$(date +%s)
-          echo "duration=$((END-START))" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Maven 测试（生成报告）
         id: test
         run: |
-          START=$(date +%s)
           ./mvnw test
-          END=$(date +%s)
-          echo "duration=$((END-START))" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
         env:
           MAVEN_OPTS: -Dmaven.repo.local=$HOME/.m2/repository
+
+      - name: 生成 JaCoCo 覆盖率报告
+        run: |
+          ./mvnw jacoco:report -q || true
 
       - name: 上传测试报告
         if: always()
@@ -80,7 +78,7 @@ jobs:
           fail-on-error: false
           fail-on-empty: false
 
-      # ============ 生成 CI 报告（Mock数据） ============
+      # ============ 生成 CI 报告 ============
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
         with:
@@ -91,17 +89,30 @@ jobs:
           mkdir -p ci-reports
           python scripts/generate-ci-report.py
 
-      - name: 上传 CI 报告
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-report-html-${{ github.run_id }}
-          path: ci-reports/
-          retention-days: 30
+      # ============ 发布报告到 GitHub Pages ============
+      - name: 配置 GitHub Pages
+        uses: actions/configure-pages@v4
 
-      - name: 保存执行时间信息
-        run: |
-          echo "${{ steps.compile.outputs.duration }}" > ci-reports/build_time.txt
-          echo "${{ steps.test.outputs.duration }}" > ci-reports/test_time.txt
+      - name: 上传 CI 报告到 Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ci-reports/
+
+      - name: 上传单测报告到 Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/surefire-reports/
+          destination: test-report
+
+      - name: 上传覆盖率报告到 Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/site/jacoco/
+          destination: coverage
+
+      - name: 部署 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
       # ============ 飞书通知 ============
       - name: 发送飞书报告
@@ -113,8 +124,8 @@ jobs:
           FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_REPO: ${{ github.repository }}
-          COMPILE_TIME: ${{ steps.compile.outputs.duration }}
-          TEST_TIME: ${{ steps.test.outputs.duration }}
+          GITHUB_SHA: ${{ github.sha }}
+          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
           COMPILE_STATUS: ${{ steps.compile.outputs.status }}
           TEST_STATUS: ${{ steps.test.outputs.status }}
 
@@ -139,13 +150,8 @@ jobs:
         run: chmod +x mvnw
 
       - name: Maven 打包
-        id: package
         run: |
-          START=$(date +%s)
           ./mvnw package -DskipTests -q
-          END=$(date +%s)
-          echo "duration=$((END-START))" >> $GITHUB_OUTPUT
-          echo "status=success" >> $GITHUB_OUTPUT
 
       - name: 上传 JAR 文件
         uses: actions/upload-artifact@v4
@@ -250,7 +256,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ghcr.io/${{ github.repository }}:latest

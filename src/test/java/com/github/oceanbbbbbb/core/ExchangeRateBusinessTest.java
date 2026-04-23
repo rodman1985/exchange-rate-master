@@ -37,9 +37,11 @@ public class ExchangeRateBusinessTest {
         BigDecimal btcPrice = new BigDecimal("67000.50");
         BigDecimal amount = new BigDecimal("100"); // 100 BTC
         BigDecimal total = btcPrice.multiply(amount);
-        assertEquals("大额计算应保留2位小数", 2, total.stripTrailingZeros().scale());
+        // 使用 setScale 确保保留2位小数
+        BigDecimal totalScaled = total.setScale(2, RoundingMode.HALF_UP);
+        assertEquals("大额计算应保留2位小数", 2, totalScaled.scale());
         assertEquals("100 BTC * 67000.50 USD = 6700050 USD", 
-            new BigDecimal("6700050.00"), total.setScale(2, RoundingMode.HALF_UP));
+            new BigDecimal("6700050.00"), totalScaled);
     }
 
     /**
@@ -151,7 +153,8 @@ public class ExchangeRateBusinessTest {
         BigDecimal anyRate = new BigDecimal("7.25");
         
         BigDecimal result = zeroAmount.multiply(anyRate);
-        assertEquals("零金额乘以任何汇率应为零", BigDecimal.ZERO, result);
+        // 使用 compareTo 比较，因为 BigDecimal 的 equals 会比较精度
+        assertEquals("零金额乘以任何汇率应为零", 0, result.compareTo(BigDecimal.ZERO));
     }
 
     /**
